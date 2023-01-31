@@ -132,13 +132,13 @@ def align_images(img1, img2):
 
 def get_value_at_point( img, p=(0,0) ):
 	p = (p[0], p[1], img[p[0],p[1]])
-	print( 'new point',p )
+	print( 'new point', int(p[0]), int(p[1]) )
 	return p
 
 def get_mean_value_At_point( img, p=(0,0), buffer=5 ):
 	area = img[p[0]-buffer:p[0]+buffer,p[1]-buffer:p[1]+buffer]
-	p = (p[0], p[1], area.mean())
-	print( 'new point',p,'std dev:', area.std() )
+	p = (int(p[0]), int(p[1]), area.mean())
+	print( 'new point',int(p[0]), int(p[1]), int(p[2]),'std dev:', area.std() )
 	return p
 
 #https://gist.github.com/ryanbranch/8aa3f0768c6cb9268296468d63f8f21c
@@ -225,6 +225,17 @@ def computeBestFitPlane(points):
     # Returns a float 4-tuple of the A/B/C/D coefficients such that (Ax + By + Cz + D == 0)
     return (a, b, c, d)
 
+def get_min_dim(im1, im2):
+	a = im2.shape[0]
+	if im1.shape[0] < a:
+		a = im1.shape[0]
+
+	b = im2.shape[1]
+	if im1.shape[1] < b:
+		b = im1.shape[1]
+
+	return a, b
+
 # https://stackoverflow.com/questions/53698635/how-to-define-a-plane-with-3-points-and-plot-it-in-3d
 def get_plane( difference, p0, p1, p2, buffer = 5 ):
 	p0 = get_mean_value_At_point( difference, p0, buffer )
@@ -253,14 +264,14 @@ def get_plane( difference, p0, p1, p2, buffer = 5 ):
 	z = np.array( (-normal[0] * xx - normal[1] * yy - d) * 1. / normal[2] )
 
 	# plot the surface
-	plt3d = plt.figure(figsize = (10,4))
-	plt.title("background 3-point plane orientation")
-	ax = plt3d.add_subplot(projection='3d')
-	ax.plot_surface(xx, yy, z)
-	ax.plot(x0, y0, z0, marker='o', color="red")
-	ax.plot(x1, y1, z1, marker='o', color="red")
-	ax.plot(x2, y2, z2, marker='o', color="red")
-	plt.show()
+	#fig = plt.figure(figsize = (10,4))
+	#plt.title("background 3-point plane orientation")
+	#ax = plt.axes(projection='3d')
+	#ax.plot3D(xx, yy, z)
+	#ax.plot(x0, y0, z0, marker='o', color="red")
+	#ax.plot(x1, y1, z1, marker='o', color="red")
+	#ax.plot(x2, y2, z2, marker='o', color="red")
+	#plt.show()
 
 	plt.figure(figsize = (20,7))
 	plt.title("calculated 3-point background plane")
@@ -270,11 +281,11 @@ def get_plane( difference, p0, p1, p2, buffer = 5 ):
 	plt.plot( x2, y2, marker='o', color="red" )
 	plt.show()
 
-	z = np.rot90(z)
+	#z = np.rot90(z)
 
 	return z, points
 
-def get_multipoint_plane( difference, points2d ):
+def get_multipoint_plane( difference, points2d, shape=(0,0) ):
 
     points = np.empty([len(points2d), 3])
     for i, p in enumerate(points2d):
@@ -283,7 +294,7 @@ def get_multipoint_plane( difference, points2d ):
     (a,b,c,d) = computeBestFitPlane(points)
     print( a,b,c,d )
 
-    X,Y = np.meshgrid(range(difference.shape[0]), range(difference.shape[1]))
+    X,Y = np.meshgrid(range(shape[0]), range(shape[1]))
     Z = (- a*X - b*Y - d) / c
 
 
