@@ -32,31 +32,15 @@ def load_file( file ):
 	# get a thumbnail in 8 bit
 	resize_factor = 1
 	file['thumb']	= cv2.resize(np.clip(file['data'], file['clip_min'], file['clip_max']),(int(file['x-pixels']/resize_factor), int(file['y-pixels']/resize_factor)),interpolation=cv2.INTER_AREA)
+
+	plot_image(file['thumb'], file['filename'], file['scale'])
+
 	file['thumb']	= cv2.normalize( (file['thumb']+(file['thumb'].min()*-1)), None, 255, 0, cv2.NORM_MINMAX, cv2.CV_8U)
 
 	print( 'x/y-scale: {:.3f} {}/px'.format(file['scale'], file['unit']) )
-	print( 'dataset size: {:.1f} x {:.1f} {}'.format( file['x-pixels']*file['scale'], file['y-pixels']*file['scale'], file['unit'] ) )
+	print( 'dataset size: {:.1f} x {:.1f} {} ({} x {} px)'.format( file['x-pixels']*file['scale'], file['y-pixels']*file['scale'], file['unit'], file['x-pixels'], file['y-pixels'] ) )
 	print('Min: {}, Max: {}, Mean: {:.6f}'.format( int(file['min']), int(file['max']), file['mean'] ))
 
-	ticks_f, labels_f = get_ticks_in_mm( file['scale'], distance=1, low_label_limit=0, high_limit=20 )
-
-	plt.figure(figsize = (15,5))
-	plt.title(file['filename'])
-	plt.imshow( np.rot90(file['thumb']), cmap='gray' )
-	ticks, labels = filter_label( ticks_f, labels_f, file['y-pixels'] )
-	plt.xticks(ticks, labels)
-	plt.xlabel('[mm]')
-	ticks, labels = filter_label( ticks_f, labels_f, file['x-pixels'] )
-	plt.yticks(ticks, labels)
-	plt.ylabel('[mm]')
-	plt.show()
-
-	print( ticks, labels )
-
-	plt.figure(figsize = (15,3))
-	plt.hist(file['data'].flatten(), bins=255) #, figsize=[30,5]
-	plt.title("Histogram ({}) in [{}]".format(file['filename'], file['unit']))
-	plt.show()
 
 	cv2.imwrite( home_dir + os.sep + file['filename'] + '.tif', (file['data']+(file['min']*-1)).astype(np.uint16) )
 
@@ -100,12 +84,12 @@ def align_images(img1, img2):
 		if m.distance < 0.4*n.distance: #modify factor 0.2 to improve or worsen the good matches
 			good.append(m)
 	matches = good
-	print(len(matches))
+	print('Found {} matching point pairs'.format(len(matches)))
 
 	# draw first 50 matches
 	matched_img = cv2.drawMatches(img1, keypoints_1, img2, keypoints_2, matches, img2, flags=2)
 
-	plt.figure(figsize = (10,5))
+	plt.figure(figsize = (20,6))
 	plt.title("visualized matches")
 	plt.imshow( np.rot90(matched_img), cmap='gray' )
 	plt.show()
@@ -292,11 +276,10 @@ def get_multipoint_plane( difference, points2d, shape=(0,0) ):
         points[i] = get_mean_value_At_point( difference, p, 5 ) #get_value_at_point( difference, p )
 
     (a,b,c,d) = computeBestFitPlane(points)
-    print( a,b,c,d )
+    #print( a,b,c,d )
 
     X,Y = np.meshgrid(range(shape[0]), range(shape[1]))
     Z = (- a*X - b*Y - d) / c
-
 
     plt3d = plt.figure(figsize = (10,4))
     plt.title("background multipoint plane orientation")
@@ -306,16 +289,98 @@ def get_multipoint_plane( difference, points2d, shape=(0,0) ):
         ax.plot(p[0], p[1], p[2], marker='o', color="red")
     plt.show()
 
-    #plt.figure(figsize = (20,7))
-    #plt.title("calculated multipoint background plane")
-    #plt.imshow( Z )#, cmap='gray'
+    plt.figure(figsize = (20,7))
+    plt.title("calculated multipoint background plane")
+    plt.imshow( Z )#, cmap='gray'
     #for p in points:
     #    plt.plot(p[0], p[1], marker='o', color="red")
-    #plt.show()
+    plt.show()
 
     Z = np.rot90(Z)
 
     return Z, points
+
+# mask_filename			- filename of the mask, which defines, which areas should be used to calculate the correction plane
+# difference			- aligned difference image
+# scale					- scale from a file object containing
+# nth_point				- use the crossing point of every nth row/column to get points used to calculate the correction plane.
+# median_filter_kernel	- use a median filter if the value is > 1. The filter will be processed on a smaller image, resizing is defined by nth_point
+def get_background_correction(mask_filename, difference, scale, nth_point = 10, median_filter_kernel = 21):
+
+	# load mask as boolean
+	resin_mask = np.flipud(cv2.imread(mask_filename, cv2.IMREAD_GRAYSCALE))[0:difference.shape[0], 0:difference.shape[1]].astype(bool)
+
+	if median_filter_kernel > 1:
+		print( 'processing median')
+		median_img = cv2.resize(difference, (int(difference.shape[1]/nth_point), int(difference.shape[0]/nth_point)))
+		median_img = median(median_img, disk(median_filter_kernel))
+		median_img = cv2.resize(median_img, (difference.shape[1], difference.shape[0]))
+		m = np.ma.array( median_img, mask=resin_mask )
+	else:
+		print( 'modifying mask - removing very deviating pixels')
+		# remove parts of the image with a large deviation.
+		# This is fairly manual.
+		fa = 2
+		fb = 4 #1.90#1.059#0.01251#.5
+		resin_difference = np.ma.array(difference, mask=resin_mask)
+		rd_mean = np.mean(resin_difference)
+		rd_std  = np.std(resin_difference)
+		resin_mask = (resin_mask | np.invert( ( difference < (rd_mean+fa*rd_std) ) & ( difference > (rd_mean-fb*rd_std) ) ).astype(bool) )
+		m = np.ma.array( difference, mask=resin_mask )
+
+	plot_image(m, 'Resin-Mask', scale)
+
+	# extract the points
+	points = []
+	for x, r in enumerate(difference):
+		if x % nth_point == 0:
+			for y,z in enumerate(r):
+				if ( y % nth_point == 0 ) & ( not resin_mask[x,y] ):
+					points.append( (y,x,z) )
+
+	points = np.array( points )
+	print("using {} points to extract the correction plane. Used every {}th point.".format(len(points), nth_point*nth_point))
+
+	# finally calculate the correction plane
+	(a,b,c,d) = computeBestFitPlane(points)
+
+	X,Y = np.meshgrid(range(difference.shape[1]), range(difference.shape[0]))
+	background = (- a*X - b*Y - d) / c
+
+	plot_image(background, "Background", scale)
+	plot_image(m-background, 'difference', scale)
+
+	return resin_mask, background
+
+img_nr = 0
+def plot_image(image, title, scale, cmap = 'gray'):
+	global img_nr
+	if image.shape[0] > image.shape[1]: image = np.rot90(image)
+
+	ticks_f, labels_f = get_ticks_in_mm( scale, distance=1, low_label_limit=0, high_limit=20 )
+
+	# plot the background
+	fig, axis = plt.subplots(1,1, figsize = ((30,6)))
+	plot = axis.imshow( image, cmap=cmap )
+
+	ticks, labels = filter_label( ticks_f, labels_f, image.shape[1] )
+	axis.set_xticks(ticks, labels)
+	axis.set_xlabel('x in mm')
+
+	ticks, labels = filter_label( ticks_f, labels_f, image.shape[0] )
+	axis.set_yticks(ticks, labels)
+	axis.set_ylabel('y in mm')
+
+	axis.set_title(title)
+
+	clb = fig.colorbar(plot, cax=make_axes_locatable(axis).append_axes('right', size='2%', pad=0.05), orientation='vertical')
+	clb.ax.set_title('Δz in nm')
+
+	plt.tight_layout()
+	plt.savefig("{} - {}.png".format(img_nr, title))
+	img_nr += 1
+	plt.show()
+
 
 # https://github.com/scikit-image/scikit-image/blob/5da1d5800f53fcdb42202396b9219ce5e0579440/skimage/measure/profile.py#L130-L174
 # not aliased!
