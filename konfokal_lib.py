@@ -65,6 +65,22 @@ def filter_label( ticks, labels, max_width ):
 
 	return ticks_filtered, labels_filtered
 
+def get_subsection(file, ab, xab, yab):# x, y, xa=0.0, xb=1.0, ya=0.0, yb=1.0):
+	xa	= int( xab[0] * ab[0] )
+	xb	= int( xab[1] * ab[0] )
+	ya	= int( yab[0] * ab[1] )
+	yb	= int( yab[1] * ab[1] )
+
+	file['data']	= file['data' ][xa:xb,ya:yb]
+	file['thumb']	= file['thumb'][xa:xb,ya:yb]
+	file['y-pixels']= xb-xa
+	file['x-pixels']= yb-ya
+	file['min']		= np.min( file['data'] )
+	file['max']		= np.max( file['data'] )
+	file['mean']	= np.mean( file['data'] )
+
+	return file
+
 def align_images(img1, img2):
 	sift = cv2.SIFT_create()
 	#  detect SIFT features in both images
@@ -247,16 +263,6 @@ def get_plane( difference, p0, p1, p2, buffer = 5 ):
 	print(normal[0], normal[1], normal[2], d)
 	z = np.array( (-normal[0] * xx - normal[1] * yy - d) * 1. / normal[2] )
 
-	# plot the surface
-	#fig = plt.figure(figsize = (10,4))
-	#plt.title("background 3-point plane orientation")
-	#ax = plt.axes(projection='3d')
-	#ax.plot3D(xx, yy, z)
-	#ax.plot(x0, y0, z0, marker='o', color="red")
-	#ax.plot(x1, y1, z1, marker='o', color="red")
-	#ax.plot(x2, y2, z2, marker='o', color="red")
-	#plt.show()
-
 	plt.figure(figsize = (20,7))
 	plt.title("calculated 3-point background plane")
 	plt.imshow( z )#, cmap='gray'
@@ -265,6 +271,7 @@ def get_plane( difference, p0, p1, p2, buffer = 5 ):
 	plt.plot( x2, y2, marker='o', color="red" )
 	plt.show()
 
+	plot_image(z, "background", 1, cmap='twilight')
 	#z = np.rot90(z)
 
 	return z, points
@@ -305,10 +312,18 @@ def get_multipoint_plane( difference, points2d, shape=(0,0) ):
 # scale					- scale from a file object containing
 # nth_point				- use the crossing point of every nth row/column to get points used to calculate the correction plane.
 # median_filter_kernel	- use a median filter if the value is > 1. The filter will be processed on a smaller image, resizing is defined by nth_point
-def get_background_correction(mask_filename, difference, scale, nth_point = 10, median_filter_kernel = 21):
+def get_background_correction(mask_filename, difference, scale, xab, yab, nth_point = 10, median_filter_kernel = 21):
+	resin_mask = np.flipud(cv2.imread(mask_filename, cv2.IMREAD_GRAYSCALE))
+
+	# crop image
+	xa	= int( xab[0] * resin_mask.shape[0] )
+	xb	= int( xab[1] * resin_mask.shape[0] )
+	ya	= int( yab[0] * resin_mask.shape[1] )
+	yb	= int( yab[1] * resin_mask.shape[1] )
+	resin_mask = resin_mask[xa:xb, ya:yb]
 
 	# load mask as boolean
-	resin_mask = np.flipud(cv2.imread(mask_filename, cv2.IMREAD_GRAYSCALE))[0:difference.shape[0], 0:difference.shape[1]].astype(bool)
+	resin_mask = resin_mask[0:difference.shape[0], 0:difference.shape[1]].astype(bool)
 
 	if median_filter_kernel > 1:
 		print( 'processing median')
@@ -320,7 +335,7 @@ def get_background_correction(mask_filename, difference, scale, nth_point = 10, 
 		print( 'modifying mask - removing very deviating pixels')
 		# remove parts of the image with a large deviation.
 		# This is fairly manual.
-		fa = 2
+		fa = 4
 		fb = 4 #1.90#1.059#0.01251#.5
 		resin_difference = np.ma.array(difference, mask=resin_mask)
 		rd_mean = np.mean(resin_difference)
@@ -377,7 +392,9 @@ def plot_image(image, title, scale, cmap = 'gray'):
 	clb.ax.set_title('Δz in nm')
 
 	plt.tight_layout()
-	plt.savefig("{} - {}.png".format(img_nr, title))
+	filename = "{} - {}.png".format(img_nr, title)
+	plt.savefig(filename)
+	print("image saved to {}".format(filename))
 	img_nr += 1
 	plt.show()
 
